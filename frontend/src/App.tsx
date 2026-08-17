@@ -8,6 +8,8 @@ import { SupplyGauge } from './components/SupplyGauge';
 import { BusinessList } from './components/BusinessList';
 import { OpportunityScanner } from './components/OpportunityScanner';
 import { MethodologyModal } from './components/MethodologyModal';
+import { runClientSideAnalysis } from './clientEngine';
+import { MASTER_CATEGORIES_DATA, CATEGORY_FAMILIES_DATA } from './categoriesData';
 
 import type {
   CategoryInfo,
@@ -34,8 +36,9 @@ export function App() {
   const [city, setCity] = useState<string>('Valencia');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('bar_pub');
 
-  const [categories, setCategories] = useState<CategoryInfo[]>([]);
-  const [families, setFamilies] = useState<Record<string, CategoryFamily>>({});
+  // Pre-initialize with master static data so dropdowns are NEVER blank
+  const [categories, setCategories] = useState<CategoryInfo[]>(MASTER_CATEGORIES_DATA);
+  const [families, setFamilies] = useState<Record<string, CategoryFamily>>(CATEGORY_FAMILIES_DATA);
   const [analysis, setAnalysis] = useState<MarketAnalysisResponse | null>(null);
   const [opportunities, setOpportunities] = useState<OpportunitiesScanResponse | null>(null);
 
@@ -45,7 +48,7 @@ export function App() {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
   const [isMethodologyOpen, setIsMethodologyOpen] = useState<boolean>(false);
 
-  // Helper to resolve API endpoint for local, preview, and GitHub Pages (devsura3939.github.io)
+  // Helper to resolve API endpoint
   const getApiUrl = (endpoint: string) => {
     const host = window.location.hostname;
     if (
@@ -57,8 +60,7 @@ export function App() {
     ) {
       return endpoint;
     }
-    // GitHub Pages fallback to active live server endpoint
-    return `https://3ad764defbf80d2a-136-66-77-67.serveousercontent.com${endpoint}`;
+    return `https://018c11c708034d39-136-67-93-101.serveousercontent.com${endpoint}`;
   };
 
   // Fetch Categories taxonomy on mount
@@ -66,13 +68,13 @@ export function App() {
     fetch(getApiUrl('/api/categories'))
       .then((res) => res.json())
       .then((data) => {
-        if (data.categories) setCategories(data.categories);
+        if (data.categories && data.categories.length > 0) setCategories(data.categories);
         if (data.families) setFamilies(data.families);
       })
-      .catch((err) => console.error('Error fetching categories taxonomy:', err));
+      .catch((err) => console.warn('Categories API fallback active:', err));
   }, []);
 
-  // Run analysis with explicit country/city/category parameters
+  // Run analysis with automatic client-side Overpass/Nominatim spatial fallback
   const handleRunAnalysis = async (
     targetCountry?: string,
     targetCity?: string,
@@ -86,24 +88,48 @@ export function App() {
     setError(null);
     setSelectedPlace(null);
 
+    const catInfo = categories.find((c) => c.id === runCategory) || MASTER_CATEGORIES_DATA.find((c) => c.id === runCategory) || {
+      id: runCategory,
+      title: runCategory.replace(/_/g, ' ').toUpperCase(),
+      family: 'services',
+      keywords: [runCategory],
+      overture_keys: [runCategory],
+      hierarchy_matchers: [runCategory]
+    };
+
     try {
       if (mode === 'analyze') {
-        const resp = await fetch(getApiUrl('/api/analyze'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            country: runCountry,
-            city: runCity,
-            category_id: runCategory
-          })
-        });
+        let data: MarketAnalysisResponse | null = null;
 
-        if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({}));
-          throw new Error(errData.detail || `Failed to analyze ${runCity}, ${runCountry}. Please check city name.`);
+        // Try backend API first with short timeout
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 6000);
+
+          const resp = await fetch(getApiUrl('/api/analyze'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              country: runCountry,
+              city: runCity,
+              category_id: runCategory
+            }),
+            signal: controller.signal
+          });
+
+          clearTimeout(timer);
+          if (resp.ok) {
+            data = await resp.json();
+          }
+        } catch (apiErr) {
+          console.warn('Backend API timeout/unavailable, triggering client-side spatial engine fallback...');
         }
 
-        const data: MarketAnalysisResponse = await resp.json();
+        // Fallback to standalone client-side spatial engine if backend was unreachable
+        if (!data) {
+          data = await runClientSideAnalysis(runCountry, runCity, catInfo);
+        }
+
         setAnalysis(data);
       } else {
         const resp = await fetch(getApiUrl('/api/opportunities'), {
@@ -115,22 +141,19 @@ export function App() {
           })
         });
 
-        if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({}));
-          throw new Error(errData.detail || `Failed to scan opportunities for ${runCity}, ${runCountry}.`);
+        if (resp.ok) {
+          const data: OpportunitiesScanResponse = await resp.json();
+          setOpportunities(data);
         }
-
-        const data: OpportunitiesScanResponse = await resp.json();
-        setOpportunities(data);
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred during market analysis.');
+      console.error('Analysis error:', err);
+      setError(err.message || `An error occurred while analyzing ${runCity}, ${runCountry}.`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial trigger on mount
   useEffect(() => {
     handleRunAnalysis();
   }, [mode]);
@@ -161,7 +184,8 @@ export function App() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Failed to export Excel spreadsheet.');
+      alert('Generating CSV export fallback...');
+      handleExportCSV();
     }
   };
 
@@ -210,7 +234,7 @@ export function App() {
         mode={mode}
         setMode={setMode}
         onOpenMethodology={() => setIsMethodologyOpen(true)}
-        overtureRelease={analysis?.city_metadata?.release || '2026-07-22.0'}
+        overtureRelease={analysis?.city_metadata?.release || '2026-08 Live Engine'}
       />
 
       {/* Hero & Search Header */}
@@ -233,7 +257,7 @@ export function App() {
           <div className="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-300 flex items-center space-x-3 shadow-lg">
             <AlertTriangle className="h-5 w-5 text-rose-400 shrink-0" />
             <div>
-              <div className="font-bold mb-0.5">Analysis Request Error</div>
+              <div className="font-bold mb-0.5 font-sans">Analysis Request Notice</div>
               <div>{error}</div>
             </div>
           </div>
@@ -254,7 +278,7 @@ export function App() {
                 </h1>
                 <p className="text-xs text-slate-400 mt-1">
                   Population: <strong className="text-white">{(analysis.target_population / 1_000_000).toFixed(2)}M</strong> ({analysis.population_year} {analysis.city_metadata.population_source}) •
-                  Overture Release: <strong className="text-slate-300">{analysis.city_metadata.release}</strong>
+                  Engine: <strong className="text-slate-300">{analysis.city_metadata.release}</strong>
                 </p>
               </div>
 
@@ -317,7 +341,7 @@ export function App() {
               <KpiCard
                 title="Data Confidence"
                 value={`${analysis.data_confidence_score}/100`}
-                subtitle="Overture + OSM + Wikidata agreement"
+                subtitle="OpenStreetMap + Nominatim + Wikidata"
                 icon={ShieldCheck}
                 badge="High Quality"
                 badgeType="success"
@@ -343,7 +367,7 @@ export function App() {
                     Geographic Competition Map
                   </h3>
                   <span className="text-[11px] text-slate-400">
-                    Click pins for Google Maps details & phone/website links
+                    Click pins for details & phone/website links
                   </span>
                 </div>
                 <MapView
