@@ -45,9 +45,25 @@ export function App() {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
   const [isMethodologyOpen, setIsMethodologyOpen] = useState<boolean>(false);
 
+  // Helper to resolve API endpoint for local, preview, and GitHub Pages (devsura3939.github.io)
+  const getApiUrl = (endpoint: string) => {
+    const host = window.location.hostname;
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.includes('serveousercontent.com') ||
+      host.includes('trycloudflare.com') ||
+      host.includes('e2b.app')
+    ) {
+      return endpoint;
+    }
+    // GitHub Pages fallback to active live server endpoint
+    return `https://3ad764defbf80d2a-136-66-77-67.serveousercontent.com${endpoint}`;
+  };
+
   // Fetch Categories taxonomy on mount
   useEffect(() => {
-    fetch('/api/categories')
+    fetch(getApiUrl('/api/categories'))
       .then((res) => res.json())
       .then((data) => {
         if (data.categories) setCategories(data.categories);
@@ -56,7 +72,7 @@ export function App() {
       .catch((err) => console.error('Error fetching categories taxonomy:', err));
   }, []);
 
-  // Run analysis with explicit country/city/category parameters to avoid state race conditions
+  // Run analysis with explicit country/city/category parameters
   const handleRunAnalysis = async (
     targetCountry?: string,
     targetCity?: string,
@@ -72,7 +88,7 @@ export function App() {
 
     try {
       if (mode === 'analyze') {
-        const resp = await fetch('/api/analyze', {
+        const resp = await fetch(getApiUrl('/api/analyze'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -90,7 +106,7 @@ export function App() {
         const data: MarketAnalysisResponse = await resp.json();
         setAnalysis(data);
       } else {
-        const resp = await fetch('/api/opportunities', {
+        const resp = await fetch(getApiUrl('/api/opportunities'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -123,7 +139,7 @@ export function App() {
   const handleExportExcel = async () => {
     if (!analysis) return;
     try {
-      const resp = await fetch('/api/export/excel', {
+      const resp = await fetch(getApiUrl('/api/export/excel'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
