@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build output
+frontend/dist/
+dist/
+build/
+
+# Caches & Databases
+data_cache.db
+*.sqlite
+*.db
+.cache/
+.DS_Store
+
+# Logs
+*.log
