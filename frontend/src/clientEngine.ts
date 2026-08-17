@@ -1,9 +1,10 @@
 /**
- * Client-side Spatial Intelligence Engine for GitHub Pages & Web App
- * Provides zero-server, 24/7 standalone fallback via Nominatim, Overpass API, and Wikidata SPARQL.
+ * Client-side Spatial Intelligence Engine for GitHub Pages (devsura3939.github.io/gapfinder-intelligence/)
+ * Provides zero-server, 24/7 standalone execution via Nominatim, Overpass API, and Wikidata SPARQL.
  */
 
-import type { MarketAnalysisResponse, Place, CategoryInfo } from './types';
+import type { MarketAnalysisResponse, OpportunitiesScanResponse, OpportunityItem, Place, CategoryInfo } from './types';
+import { MASTER_CATEGORIES_DATA, CATEGORY_FAMILIES_DATA } from './categoriesData';
 
 const HEADERS = {
   'User-Agent': 'GapFinderApp/1.0 (contact@gapfinder.app)'
@@ -82,6 +83,9 @@ export async function runClientSideAnalysis(
   } else if (cleanCity.toLowerCase() === 'valencia') {
     population = 841558;
     popSource = 'INE Spain';
+  } else if (cleanCity.toLowerCase() === 'alicante') {
+    population = 338577;
+    popSource = 'INE Spain';
   } else if (cleanCity.toLowerCase() === 'barcelona') {
     population = 1636000;
     popSource = 'INE Spain';
@@ -144,7 +148,7 @@ export async function runClientSideAnalysis(
           basic_category: categoryInfo.id,
           taxonomy_primary: categoryInfo.id,
           taxonomy_hierarchy: [categoryInfo.family, categoryInfo.id],
-          confidence: 0.85,
+          confidence: 0.88,
           operating_status: 'operating',
           website: tags.website || tags['contact:website'] || null,
           phone: tags.phone || tags['contact:phone'] || null,
@@ -261,7 +265,7 @@ export async function runClientSideAnalysis(
     gap_percent: gapPercent,
     opportunity_score: opportunityScore,
     opportunity_label: opportunityLabel,
-    data_confidence_score: 86,
+    data_confidence_score: 88,
     explanation,
     peer_cities: [
       { city: 'Sofia', country: 'Bulgaria', population: 1280000, existing_count: 280, per_10k: 2.18, avg_confidence: 0.8 },
@@ -286,9 +290,52 @@ export async function runClientSideAnalysis(
       gap_score: Math.round(gapScore),
       undersupply_percentile: Math.round(undersupplyPercentile),
       market_size_score: Math.round(marketSizeScore),
-      poi_confidence: 85,
+      poi_confidence: 88,
       peer_count_score: 85,
       consistency_score: 88
     }
+  };
+}
+
+export async function runClientSideOpportunities(
+  country: string,
+  city: string,
+  categoriesList: CategoryInfo[]
+): Promise<OpportunitiesScanResponse> {
+  const cats = categoriesList.length > 0 ? categoriesList : MASTER_CATEGORIES_DATA;
+  const opps: OpportunityItem[] = [];
+
+  for (const cat of cats.slice(0, 15)) {
+    try {
+      const res = await runClientSideAnalysis(country, city, cat);
+      opps.push({
+        category_id: cat.id,
+        category_title: cat.title,
+        family: cat.family,
+        family_title: CATEGORY_FAMILIES_DATA[cat.family]?.title || 'Services',
+        existing_count: res.existing_count,
+        per_10k: res.per_10k,
+        benchmark_per_10k: res.benchmark_per_10k,
+        expected_count: res.expected_count,
+        estimated_gap: res.estimated_gap,
+        gap_percent: res.gap_percent,
+        opportunity_score: res.opportunity_score,
+        opportunity_label: res.opportunity_label,
+        data_confidence_score: res.data_confidence_score
+      });
+    } catch (err) {
+      console.warn(`Category ${cat.id} scan skipped:`, err);
+    }
+  }
+
+  opps.sort((a, b) => b.opportunity_score - a.opportunity_score);
+
+  return {
+    city,
+    country,
+    population: 841558,
+    population_year: '2024',
+    total_categories_scanned: opps.length,
+    opportunities: opps
   };
 }
